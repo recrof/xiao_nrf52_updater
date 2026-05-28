@@ -1,0 +1,70 @@
+name: Build & Release
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware
+        run: pio run
+
+      # Produce a drag-and-drop UF2 alongside the .hex and the nrfutil .zip.
+      # uf2conv lives in microsoft/uf2; fetched at build time so we don't
+      # vendor a copy here.
+      - name: Convert hex to UF2
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py -o /tmp/uf2conv.py
+          python3 /tmp/uf2conv.py \
+            -f 0xADA52840 \
+            -c .pio/build/xiao_nrf52840/firmware.hex \
+            -o .pio/build/xiao_nrf52840/firmware.uf2
+
+      - name: Stage release artifacts
+        run: |
+          mkdir -p out
+          # Tag pushes get versioned names; manual runs just use the build name.
+          VER="${GITHUB_REF_NAME}"
+          [[ "$GITHUB_REF" == refs/tags/* ]] || VER="dev-${GITHUB_SHA::7}"
+          cp .pio/build/xiao_nrf52840/firmware.hex out/xiao_nrf52_updater-${VER}.hex
+          cp .pio/build/xiao_nrf52840/firmware.zip out/xiao_nrf52_updater-${VER}.zip
+          cp .pio/build/xiao_nrf52840/firmware.uf2 out/xiao_nrf52_updater-${VER}.uf2
+          ls -la out/
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: out/*
+
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          draft: true
+          files: out/*
