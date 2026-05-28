@@ -1,0 +1,6 @@
+ble_name=WTL1
+prn=300
+high_mtu=1
+retries=3
+min_rssi=-60
+retry_cooldown=3

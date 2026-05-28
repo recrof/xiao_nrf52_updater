@@ -1,0 +1,35 @@
+# PlatformIO build / library / dependency tree
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# VS Code per-project state (keep extensions.json so contributors get prompted)
+.vscode/*
+!.vscode/extensions.json
+
+# Claude
+.claude/
+
+# Editor / IDE
+.idea/
+*.swp
+*~
+*.tmp
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Build artifacts that occasionally land at the root
+*.o
+*.elf
+*.hex
+*.uf2
+*.bin
+*.map
+
+# Runtime artifacts (in case anyone ever copies them off the QSPI drive)
+LOG.TXT
