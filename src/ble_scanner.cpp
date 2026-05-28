@@ -11,10 +11,81 @@ static const uint8_t kLegacyDfuUuid128[16] = {
   0xDE, 0xEF, 0x12, 0x12, 0x30, 0x15, 0x00, 0x00,
 };
 
-static volatile bool s_found = false;
-static Target        s_match;
-static const char*   s_name_filter = nullptr;   // nullptr or "" = accept any
-static int8_t        s_min_rssi    = -127;      // -127 = no minimum
+static volatile bool         s_found       = false;
+static Target                s_match;
+static const char*           s_name_filter = nullptr;   // nullptr or "" = accept any
+static int8_t                s_min_rssi    = -127;      // -127 = no minimum
+static const ble_gap_addr_t* s_prefer_mac  = nullptr;   // optional MAC / MAC+1 fast-path
+static bool                  s_debug       = false;     // verbose per-ad log
+
+void set_debug(bool on) { s_debug = on; }
+
+// Pipe-delimited substring match: returns true if `name` contains any of
+// the '|'-separated tokens in `filter` (after trimming each). Empty tokens
+// are ignored. An empty/null filter returns false here; the caller treats
+// "no filter" as a separate code path.
+static bool name_matches(const char* name, const char* filter) {
+  if (!name || !filter || !*filter) return false;
+
+  char buf[24];
+  size_t n = strnlen(filter, sizeof(buf) - 1);
+  memcpy(buf, filter, n);
+  buf[n] = '\0';
+
+  char* save = nullptr;
+  for (char* tok = strtok_r(buf, "|", &save); tok; tok = strtok_r(nullptr, "|", &save)) {
+    while (*tok == ' ' || *tok == '\t') tok++;
+    char* end = tok + strlen(tok);
+    while (end > tok && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+    if (*tok && strstr(name, tok)) return true;
+  }
+  return false;
+}
+
+// True if `addr` equals `*ref` or `*ref + 1` (with carry across all 6 bytes).
+// Nordic Legacy DFU bootloaders that boot out of an app-mode firmware
+// typically advertise from a MAC that's one higher than the app's MAC.
+static bool mac_match_or_plus_one(const ble_gap_addr_t& addr, const ble_gap_addr_t* ref) {
+  if (!ref) return false;
+  if (memcmp(addr.addr, ref->addr, 6) == 0) return true;
+  ble_gap_addr_t plus_one = *ref;
+  for (int i = 0; i < 6; i++) {
+    plus_one.addr[i]++;
+    if (plus_one.addr[i] != 0) break;   // no further carry needed
+  }
+  return memcmp(addr.addr, plus_one.addr, 6) == 0;
+}
+
+// One-line summary of an ad. Caller passes the reason; we de-dupe per MAC so
+// dense BLE environments don't flood the log. Gated on `s_debug`.
+static void log_seen(const ble_gap_evt_adv_report_t* report, const char* name,
+                     const char* reason) {
+  if (!s_debug) return;
+
+  static uint8_t  seen_macs[8][6];
+  static char     seen_reasons[8][8];
+  static uint8_t  seen_count = 0;
+
+  // Skip if we've already logged this MAC with the same reason.
+  for (uint8_t i = 0; i < seen_count; i++) {
+    if (memcmp(seen_macs[i], report->peer_addr.addr, 6) == 0 &&
+        strncmp(seen_reasons[i], reason, sizeof(seen_reasons[0])) == 0) {
+      return;
+    }
+  }
+  if (seen_count < 8) {
+    memcpy(seen_macs[seen_count], report->peer_addr.addr, 6);
+    snprintf(seen_reasons[seen_count], sizeof(seen_reasons[0]), "%s", reason);
+    seen_count++;
+  }
+
+  logger::log("scan: %s %02X:%02X:%02X:%02X:%02X:%02X rssi=%d name='%s'",
+              reason,
+              report->peer_addr.addr[5], report->peer_addr.addr[4],
+              report->peer_addr.addr[3], report->peer_addr.addr[2],
+              report->peer_addr.addr[1], report->peer_addr.addr[0],
+              report->rssi, name);
+}
 
 static void scan_cb(ble_gap_evt_adv_report_t* report) {
   if (s_found) {
@@ -22,21 +93,7 @@ static void scan_cb(ble_gap_evt_adv_report_t* report) {
     return;
   }
 
-  // Quick check: is the Legacy DFU service UUID present in the advert?
-  // Bluefruit's helper handles both "complete" and "incomplete" UUID lists
-  // and either 16-bit or 128-bit forms.
-  BLEUuid uuid(kLegacyDfuUuid128);
-  if (!Bluefruit.Scanner.checkReportForUuid(report, uuid)) {
-    Bluefruit.Scanner.resume();
-    return;
-  }
-
-  // RSSI threshold rejects weak ads early, before we even parse the name.
-  if (report->rssi < s_min_rssi) {
-    Bluefruit.Scanner.resume();
-    return;
-  }
-
+  // Always parse the name first so every rejection log line is informative.
   Target candidate{};
   candidate.addr = report->peer_addr;
   candidate.rssi = report->rssi;
@@ -50,12 +107,37 @@ static void scan_cb(ble_gap_evt_adv_report_t* report) {
   }
   candidate.name[sizeof(candidate.name) - 1] = '\0';
 
-  // Optional substring name filter from config.
-  if (s_name_filter && s_name_filter[0] != '\0') {
-    if (strstr(candidate.name, s_name_filter) == nullptr) {
-      Bluefruit.Scanner.resume();
-      return;
-    }
+  // RSSI threshold.
+  if (report->rssi < s_min_rssi) {
+    log_seen(report, candidate.name, "weak");
+    Bluefruit.Scanner.resume();
+    return;
+  }
+
+  // Filter strategy. Accept the ad if any of these holds:
+  //   1. `prefer_mac` is set and the report's MAC == ref or ref+1 (used
+  //      right after a buttonless trigger so we don't lose the target
+  //      when the bootloader advertises under a different name).
+  //   2. A name filter is configured and the name matches (pipe-delimited
+  //      OR of substring patterns).
+  //   3. No name filter is configured and the ad carries the Legacy DFU
+  //      service UUID (typical of bootloader-mode targets).
+  bool mac_ok       = mac_match_or_plus_one(report->peer_addr, s_prefer_mac);
+  bool has_name     = (s_name_filter && s_name_filter[0] != '\0');
+  bool name_ok      = has_name && name_matches(candidate.name, s_name_filter);
+  bool need_uuid    = !mac_ok && !has_name;
+  bool uuid_ok      = false;
+  if (need_uuid) {
+    BLEUuid uuid(kLegacyDfuUuid128);
+    uuid_ok = Bluefruit.Scanner.checkReportForUuid(report, uuid);
+  }
+
+  if (!(mac_ok || name_ok || uuid_ok)) {
+    const char* reason = mac_ok      ? "mac" :
+                         (has_name ? "name?" : "uuid?");
+    log_seen(report, candidate.name, reason);
+    Bluefruit.Scanner.resume();
+    return;
   }
 
   s_match  = candidate;
@@ -63,7 +145,7 @@ static void scan_cb(ble_gap_evt_adv_report_t* report) {
   Bluefruit.Scanner.stop();
 }
 
-void begin() {
+void begin(int8_t tx_power_dbm) {
   // The SoftDevice's ATT buffer cap is fixed at Bluefruit.begin() time.
   // Default is 23 (MTU=23). To make later MTU-exchange requests effective,
   // we have to pre-allocate buffer space for the maximum we ever want:
@@ -77,22 +159,35 @@ void begin() {
   // 0 peripheral, 1 central — we're a pure DFU client.
   Bluefruit.begin(0, 1);
   Bluefruit.setName("XIAO DFU updater");
+
+  // TX power. Allowed values on nRF52840: -40, -20, -16, -12, -8, -4, 0,
+  // 2, 3, 4, 5, 6, 7, 8 (max). setTxPower() returns false and leaves the
+  // previous (default 0 dBm) value if the requested level isn't in the list.
+  if (!Bluefruit.setTxPower(tx_power_dbm)) {
+    Bluefruit.setTxPower(0);
+  }
+
   Bluefruit.Scanner.setRxCallback(scan_cb);
   Bluefruit.Scanner.restartOnDisconnect(false);
   Bluefruit.Scanner.useActiveScan(true);
   Bluefruit.Scanner.setInterval(160, 80);  // 100 ms window / 200 ms interval
 }
 
-bool find_first(Target* out, uint32_t timeout_ms, const char* name_filter, int8_t min_rssi) {
+bool find_first(Target* out, uint32_t timeout_ms, const char* name_filter,
+                int8_t min_rssi, const ble_gap_addr_t* prefer_mac) {
   s_found       = false;
   s_name_filter = name_filter;
   s_min_rssi    = min_rssi;
+  s_prefer_mac  = prefer_mac;
   memset(&s_match, 0, sizeof(s_match));
 
   Bluefruit.Scanner.start(0);  // 0 = scan until told to stop
 
+  // timeout_ms == 0 means "scan forever" (drone use). Otherwise we honour
+  // the deadline.
   uint32_t deadline = millis() + timeout_ms;
-  while (!s_found && (int32_t)(deadline - millis()) > 0) {
+  while (!s_found) {
+    if (timeout_ms != 0 && (int32_t)(deadline - millis()) <= 0) break;
     delay(50);
   }
 

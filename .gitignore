@@ -33,3 +33,7 @@
 
 # Runtime artifacts (in case anyone ever copies them off the QSPI drive)
 LOG.TXT
+
+# Vendored reference material (kept locally for grep convenience;
+# README links to the upstream repo so contributors don't need it)
+dfu/

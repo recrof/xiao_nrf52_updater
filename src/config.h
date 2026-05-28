@@ -32,6 +32,22 @@ struct Config {
   // a moment to settle after a reset before it will accept another START_DFU,
   // and slamming retries returns INVALID_STATE.
   uint16_t retry_cooldown;
+
+  // BLE transmit power in dBm. nRF52840 valid values:
+  //   -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8
+  // Default 0. Crank to 8 for max range (drone use); SoftDevice will reject
+  // anything not in the allowed list and we fall back to 0.
+  int8_t   tx_power;
+
+  // Per-scan timeout in seconds. 0 = scan forever (never give up) — the
+  // default, intended for drone use where the target might take minutes
+  // to come into range. Set non-zero to cap the wait.
+  uint16_t scan_timeout;
+
+  // If true, log every rejected advertisement (weak signal / name mismatch /
+  // UUID mismatch). Useful when diagnosing why a target isn't being picked up.
+  // Off by default to keep the field log quiet.
+  bool     scan_debug;
 };
 
 // Set the working config from defaults, then overlay anything found in

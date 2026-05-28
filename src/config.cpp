@@ -9,11 +9,14 @@ static Config s_current;
 
 static void apply_defaults(Config* c) {
   c->ble_name[0]      = '\0';
-  c->prn              = 10;
+  c->prn              = 8;
   c->high_mtu         = false;
   c->retries          = 3;
-  c->min_rssi         = -127;  // accept any signal
+  c->min_rssi         = -90;  // minimal viable signal
   c->retry_cooldown = 5;
+  c->tx_power       = 4;
+  c->scan_timeout   = 0;     // 0 = infinite, scan forever
+  c->scan_debug     = false;
 }
 
 static void trim(char* s) {
@@ -48,6 +51,16 @@ static void apply_kv(Config* c, const char* key, const char* val) {
   } else if (!strcmp(key, "retry_cooldown")) {
     int n = atoi(val);
     if (n >= 0 && n <= 600) c->retry_cooldown = (uint16_t)n;
+  } else if (!strcmp(key, "tx_power")) {
+    int n = atoi(val);
+    // We don't enforce the allowed-values list here; Bluefruit::setTxPower
+    // will silently reject invalid values when we apply it.
+    if (n >= -40 && n <= 8) c->tx_power = (int8_t)n;
+  } else if (!strcmp(key, "scan_timeout")) {
+    int n = atoi(val);
+    if (n >= 0 && n <= 65535) c->scan_timeout = (uint16_t)n;
+  } else if (!strcmp(key, "scan_debug")) {
+    c->scan_debug = parse_bool(val);
   }
 }
 

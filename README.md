@@ -40,7 +40,9 @@ Optional. `key=value` per line, `#` or `;` start a comment, whitespace trimmed. 
 
 ```
 # Substring filter for advertised BLE name. Empty = any peer with DFU service.
-ble_name=WTL1
+# Multiple names can be OR'd with '|', useful when an app and its bootloader
+# advertise under different names (Nordic samples often do).
+ble_name=RAK4631 | 4631_DFU
 
 # Packet Receipt Notification cadence (writes per ACK from the peer).
 # 10 is the safe Nordic default. Higher = faster but risk overflowing the
@@ -62,7 +64,31 @@ retry_cooldown=5
 # scan. -127 = no minimum. Useful on a drone to refuse flashing when
 # the signal isn't strong enough to reliably stream.
 min_rssi=-60
+
+# BLE TX power in dBm. nRF52840 allowed values:
+#   -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8
+# Default 0. Crank to 8 for max range; anything not in the list is
+# silently rejected and the SoftDevice keeps the previous level.
+tx_power=8
+
+# Scan timeout in seconds. 0 = scan forever (the default; intended for
+# drone use where the target may take minutes to come into range).
+# Non-zero caps the wait; on expiry the sequence gives up without
+# consuming any DFU retry slot.
+scan_timeout=0
+
+# When set, every rejected advertisement is logged with reason + MAC.
+# Useful for diagnosing "my target isn't being picked up". Off in the field.
+scan_debug=0
 ```
+
+Notes:
+
+- A configured `ble_name` switches the scanner from UUID matching to **name-substring** matching. Most Nordic app-mode firmwares expose the Legacy DFU service in their GATT database but do not advertise the UUID; matching on the device name is the only way to find them before connecting. Without `ble_name`, only peers that explicitly advertise the Legacy DFU service UUID are considered (typical of bootloader-mode targets).
+- `ble_name` accepts multiple substrings joined by `|`. Example: `RAK4631 | 4631_DFU` matches the RAK app *and* its bootloader, which advertise under different names.
+- **MAC+1 fallback after buttonless**: after we send the buttonless trigger, the next scan automatically also accepts the same MAC or MAC+1 (Nordic's bootloader convention). This is on top of the name filter, so even if the bootloader's name doesn't match `ble_name`, the address-based fallback finds it.
+
+`retries` only counts post-scan DFU attempts. Scan failures (with `scan_timeout=0`, impossible) and buttonless triggers don't consume retries.
 
 ## LED indicators
 
@@ -127,12 +153,10 @@ src/
   config.{h,cpp}     - CONFIG.TXT parser
   zip_reader.{h,cpp} - minimal STORE-only ZIP walker
   firmware_zip.{h,cpp} - manifest.json parsing, locates .bin + .dat
-  ble_scanner.{h,cpp}  - Bluefruit central scan, UUID + name + RSSI filtering
+  ble_scanner.{h,cpp}  - Bluefruit central scan, UUID + pipe-delimited name + RSSI + MAC/MAC+1 filtering
   dfu_legacy.{h,cpp}   - Legacy DFU client state machine (mirrors LegacyDfuImpl.java)
 boards/              - board JSON + s140 linker script
 variants/xiao_nrf52/ - pin map + variant.cpp (BSP doesn't ship one for XIAO)
-dfu/                 - Reference: Nordic Android DFU library (Java). Not built.
-usb/                 - Reference: Adafruit nRF52 bootloader MSC/ghostfat. Not built.
 ```
 
 ## Implementation notes worth knowing
@@ -149,7 +173,8 @@ These were each painful to discover; capturing them so they don't have to be red
 - **MTU exchange requires `Bluefruit.configCentralConn(247, ...)` BEFORE `Bluefruit.begin()`**. The SoftDevice allocates ATT buffers at `begin()` time; bumping the runtime exchange alone is not enough.
 - **WRITE_REQ vs WRITE_CMD on the Control Point**: many Legacy DFU bootloaders advertise the Control Point as Write-only (no `WriteWithoutResponse`). The SoftDevice silently drops WRITE_CMDs to such characteristics, so all control-plane writes - including `ACTIVATE_AND_RESET` and `RESET` - must use `write_resp` (WRITE_REQ). Android's stack gets away with no-response because it transparently re-types, but Bluefruit/SoftDevice does not.
 - **ACTIVATE timing**: after ACTIVATE_AND_RESET the peer may need up to ~2 minutes to erase + copy a large SD+BL image before it resets and disconnects. We `wait_disconnected(120000)` instead of initiating our own disconnect - disconnecting early aborts the activation and leaves the peer running the old firmware.
-- **Buttonless trigger**: an app-mode target exposes only the Control Point (no Packet characteristic). We detect this and write `01 04` to enter bootloader, wait for the disconnect, then rescan and run the normal DFU.
+- **Buttonless detection via DFU Version**, not characteristic presence. The original `LegacyButtonlessDfuImpl.java` heuristic ("Packet characteristic missing → app mode") doesn't hold on every firmware — the RAK4631 app, for instance, exposes all three DFU characteristics, same as its bootloader. The reliable signal is the DFU Version characteristic: `0x0001` = 0.1 = app mode (send buttonless trigger), `0x0005`+ = bootloader (proceed with full DFU). Our parser also fixes a 16-bit-endianness foot-gun: the value is little-endian, so byte 0 is `minor`, byte 1 is `major`.
+- **MAC+1 fallback after buttonless**: Nordic bootloaders that boot out of app-mode firmware typically advertise from a MAC that's one higher than the app's MAC (often also with a different name — e.g. `RAK4631_OTA` → `4631_DFU`). After we send the buttonless trigger, the next scan automatically accepts ads from the same MAC or MAC+1, on top of the configured name filter.
 - **Always send RESET on the error path**: leaving the bootloader in a half-DFU state makes the next `START_DFU` return `INVALID_STATE` (status 0x02). Every error path goes through `fail()` which writes RESET first.
 
 ## Known limitations

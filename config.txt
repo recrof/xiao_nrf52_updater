@@ -1,6 +1,29 @@
-ble_name=WTL1
+# Substring filter for advertised BLE name. Empty = any peer with DFU service.
+ble_name=
+
+# Packet Receipt Notification cadence (writes per ACK from the peer).
+# 10 is the safe Nordic default. Higher = faster but risk overflowing the
+# peer's RX queue.
 prn=300
+
+# Negotiate MTU 247 after connect (5–10x faster stream).
+# Some older bootloaders ignore the request and we fall back to 20 B writes.
 high_mtu=1
+
+# Number of DFU attempts before giving up.
 retries=3
+
+# Seconds to wait between failed attempts. The bootloader needs time to
+# settle after a reset before it'll accept another START_DFU.
+retry_cooldown=5
+
+# Minimum RSSI (dBm, negative). Ads weaker than this are rejected during
+# scan. -127 = no minimum. Useful on a drone to refuse flashing when
+# the signal isn't strong enough to reliably stream.
 min_rssi=-60
-retry_cooldown=3
+
+# BLE TX power in dBm. nRF52840 allowed values:
+#   -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8
+# Default 0. Crank to 8 for max range; anything not in the list is
+# silently rejected and the SoftDevice keeps the previous level.
+tx_power=8

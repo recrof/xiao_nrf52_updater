@@ -192,11 +192,24 @@ Result run(const ble_scanner::Target& target,
     return fail(Result::kCharMissing);
   }
 
-  // Buttonless mode detection: app-mode firmware exposes the DFU service with
-  // the Control Point characteristic but NOT the Packet characteristic. In
-  // that case write [0x01, 0x04] ("enter bootloader") and disconnect — the
-  // peer will reboot, often with MAC+1, and the caller should rescan.
-  if (!pkt_ok) {
+  // Read the DFU Version characteristic (little-endian uint16). Format is
+  // hi-byte = major, lo-byte = minor:
+  //   0x0001 = 0.1 = app with buttonless support — peer needs trigger
+  //   0x0005+ = 0.5+ = real bootloader — proceed with full DFU
+  uint16_t version = 0;
+  if (ver_ok) {
+    uint8_t verbuf[2] = {0, 0};
+    s_ver.read(verbuf, 2);
+    version = (uint16_t)verbuf[0] | ((uint16_t)verbuf[1] << 8);
+    logger::log("dfu: peer DFU version = %u.%u  (raw 0x%04X)",
+                version >> 8, version & 0xFF, version);
+  }
+
+  // Buttonless detection: prefer the version byte when present. Fall back
+  // to "Packet characteristic missing" for older firmwares that don't
+  // expose the Version characteristic at all.
+  bool is_app_mode = (ver_ok && version == 0x0001) || !pkt_ok;
+  if (is_app_mode) {
     logger::log("dfu: peer in app mode, sending buttonless trigger");
     s_ctrl.enableNotify();
     uint8_t enter_bl[2] = { 0x01, 0x04 };
@@ -214,12 +227,6 @@ Result run(const ble_scanner::Target& target,
     return fail(Result::kCharMissing);
   }
   logger::log("dfu: notifications enabled");
-
-  if (ver_ok) {
-    uint8_t verbuf[2] = {0, 0};
-    s_ver.read(verbuf, 2);
-    logger::log("dfu: peer DFU version = %u.%u", verbuf[0], verbuf[1]);
-  }
 
   // -------------------- Start DFU + image sizes --------------------
   uint8_t start_cmd[2] = { OP_START_DFU, bundle.type };
