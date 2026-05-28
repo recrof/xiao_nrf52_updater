@@ -35,10 +35,11 @@ jobs:
 
       # Produce a drag-and-drop UF2 alongside the .hex and the nrfutil .zip.
       # uf2conv lives in microsoft/uf2; fetched at build time so we don't
-      # vendor a copy here.
+      # vendor a copy here. It expects uf2families.json to sit next to it.
       - name: Convert hex to UF2
         run: |
-          curl -fsSL https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py -o /tmp/uf2conv.py
+          curl -fsSL https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py     -o /tmp/uf2conv.py
+          curl -fsSL https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2families.json -o /tmp/uf2families.json
           python3 /tmp/uf2conv.py \
             -f 0xADA52840 \
             -c .pio/build/xiao_nrf52840/firmware.hex \
