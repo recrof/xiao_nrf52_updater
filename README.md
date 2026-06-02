@@ -41,7 +41,7 @@ Optional. `key=value` per line, `#` or `;` start a comment, whitespace trimmed. 
 ```
 # Substring filter for advertised BLE name. Empty = any peer with DFU service.
 # Multiple names can be OR'd with '|', useful when an app and its bootloader
-# advertise under different names (Nordic samples often do).
+# advertise under different names, like oltaco's OTAFIX bootloader does
 ble_name=RAK4631 | 4631_DFU
 
 # Packet Receipt Notification cadence (writes per ACK from the peer).
