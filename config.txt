@@ -4,7 +4,7 @@ ble_name=
 # Packet Receipt Notification cadence (writes per ACK from the peer).
 # 10 is the safe Nordic default. Higher = faster but risk overflowing the
 # peer's RX queue.
-prn=300
+prn=10
 
 # Negotiate MTU 247 after connect (5–10x faster stream).
 # Some older bootloaders ignore the request and we fall back to 20 B writes.
