@@ -159,27 +159,9 @@ boards/              - board JSON + s140 linker script
 variants/xiao_nrf52/ - pin map + variant.cpp (BSP doesn't ship one for XIAO)
 ```
 
-## Implementation notes worth knowing
-
-These were each painful to discover; capturing them so they don't have to be rediscovered.
-
-- **NRFX_QSPI_ENABLED**: must be passed as a build flag. Without it `nrfx_qspi_init()` compiles to a stub and the QSPI peripheral never turns on; flash reads come back as `0xFFFFFF`.
-- **Adafruit_SPIFlash default device table** doesn't include the Puya P25Q16H on the XIAO. We pass the device explicitly with `flash.begin(&P25Q16H, 1)`.
-- **`#include <Adafruit_TinyUSB.h>` must be in the same TU as `Serial`**, otherwise the BSP's Serial macro doesn't get redirected to TinyUSB CDC and the whole USB stack fails to enumerate.
-- **No duplicate TinyUSB libraries**: the BSP fork bundles `Adafruit_TinyUSB_Arduino`; adding `adafruit/Adafruit TinyUSB Library` to `lib_deps` causes the linker to pull mixed symbols and USB silently breaks.
-- **P25Q16H deep power-down**: the factory bootloader leaves the chip in DPD to save current. We send `0xAB` (Release From Power Down) before the first JEDEC read.
-- **SdFat's FatFormatter rejects volumes ≤ 6 MB** (built for SD cards). We write a minimal FAT12 image directly. The image uses a 128-entry root dir because macOS produces a lot of metadata sidecar files (`.DS_Store`, `._*`, `.fseventsd`, `.Trashes`, `.Spotlight-V100`) that fill smaller root dirs and report "disk full" while clusters are still mostly free.
-- **macOS dot-prefix filter**: when scanning the drive for the single firmware `.zip`, files starting with `.` are skipped to avoid false-counting `._foo.zip` sidecars.
-- **MTU exchange requires `Bluefruit.configCentralConn(247, ...)` BEFORE `Bluefruit.begin()`**. The SoftDevice allocates ATT buffers at `begin()` time; bumping the runtime exchange alone is not enough.
-- **WRITE_REQ vs WRITE_CMD on the Control Point**: many Legacy DFU bootloaders advertise the Control Point as Write-only (no `WriteWithoutResponse`). The SoftDevice silently drops WRITE_CMDs to such characteristics, so all control-plane writes - including `ACTIVATE_AND_RESET` and `RESET` - must use `write_resp` (WRITE_REQ). Android's stack gets away with no-response because it transparently re-types, but Bluefruit/SoftDevice does not.
-- **ACTIVATE timing**: after ACTIVATE_AND_RESET the peer may need up to ~2 minutes to erase + copy a large SD+BL image before it resets and disconnects. We `wait_disconnected(120000)` instead of initiating our own disconnect - disconnecting early aborts the activation and leaves the peer running the old firmware.
-- **Buttonless detection via DFU Version**, not characteristic presence. The original `LegacyButtonlessDfuImpl.java` heuristic ("Packet characteristic missing → app mode") doesn't hold on every firmware — the RAK4631 app, for instance, exposes all three DFU characteristics, same as its bootloader. The reliable signal is the DFU Version characteristic: `0x0001` = 0.1 = app mode (send buttonless trigger), `0x0005`+ = bootloader (proceed with full DFU). Our parser also fixes a 16-bit-endianness foot-gun: the value is little-endian, so byte 0 is `minor`, byte 1 is `major`.
-- **MAC+1 fallback after buttonless**: Nordic bootloaders that boot out of app-mode firmware typically advertise from a MAC that's one higher than the app's MAC (often also with a different name — e.g. `RAK4631_OTA` → `4631_DFU`). After we send the buttonless trigger, the next scan automatically accepts ads from the same MAC or MAC+1, on top of the configured name filter.
-- **Always send RESET on the error path**: leaving the bootloader in a half-DFU state makes the next `START_DFU` return `INVALID_STATE` (status 0x02). Every error path goes through `fail()` which writes RESET first.
-
 ## Known limitations
 
-- Single-LUN MSC; only one zip and one `LOG.TXT` are expected.
+- Single-LUN MSC; only one zip is expected.
 - Combined SD+BL+App in a single zip isn't supported.
 - No Secure DFU (only Legacy, as per the project scope).
 - No host-set wall clock; `LOG.TXT` timestamps are boot-relative.
