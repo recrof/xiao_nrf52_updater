@@ -20,7 +20,7 @@ retry_cooldown=5
 # Minimum RSSI (dBm, negative). Ads weaker than this are rejected during
 # scan. -127 = no minimum. Useful on a drone to refuse flashing when
 # the signal isn't strong enough to reliably stream.
-min_rssi=-60
+min_rssi=-80
 
 # BLE TX power in dBm. nRF52840 allowed values:
 #   -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8
