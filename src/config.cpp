@@ -10,7 +10,7 @@ static Config s_current;
 static void apply_defaults(Config* c) {
   c->ble_name[0]      = '\0';
   c->prn              = 8;
-  c->high_mtu         = false;
+  c->high_mtu         = true;
   c->retries          = 3;
   c->min_rssi         = -90;  // minimal viable signal
   c->retry_cooldown = 5;
