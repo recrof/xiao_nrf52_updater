@@ -9,7 +9,7 @@ Intended use: a drone-mounted programmer that updates a remote nRF52 payload in 
 | Component | Role |
 |---|---|
 | **USB MSC** | Exposes the XIAO's 2 MB QSPI flash as a FAT12 USB drive (label `XIAO DFU`). The host drops the `.zip` and the optional `CONFIG.TXT` here. |
-| **`CONFIG.TXT`** | Optional `key=value` config (BLE name filter, PRN, MTU, retries, min RSSI, retry cooldown). |
+| **`CONFIG.TXT`** | `key=value` config (BLE name filter, PRN, MTU, retries, min RSSI, retry cooldown). |
 | **`LOG.TXT`** | Append-only log written by the firmware between sessions. |
 | **BLE central** | Bluefruit central; scans for the Nordic Legacy DFU service UUID. |
 | **DFU client** | Implements the Nordic Legacy DFU protocol (mirrors the Android `LegacyDfuImpl.java`), including the buttonless trigger for app-mode targets. |
@@ -18,7 +18,7 @@ Intended use: a drone-mounted programmer that updates a remote nRF52 payload in 
 
 1. Plug the XIAO into a host. The `XIAO DFU` drive appears.
 2. Drop a firmware bundle (`*.zip` produced by `nrfutil pkg generate`) into the drive root.
-3. Optionally drop a `CONFIG.TXT`.
+3. Copy a `CONFIG.TXT` from the repo and change `ble_name`, so it matches with BLE name you want to update.
 4. **Eject the drive** (or unplug if the XIAO is battery-powered).
 5. The XIAO scans for a target advertising the Legacy DFU service, optionally sends the buttonless trigger to kick it from app mode into bootloader, then runs the full DFU sequence.
 6. On success the `.zip` is deleted from the drive; the `LOG.TXT` keeps the history.
