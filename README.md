@@ -18,7 +18,7 @@ Intended use: a drone-mounted programmer that updates a remote nRF52 payload in 
 
 1. Plug the XIAO into a host. The `XIAO DFU` drive appears.
 2. Drop a firmware bundle (`*.zip` produced by `nrfutil pkg generate`) into the drive root.
-3. Copy a `CONFIG.TXT` from the repo and change `ble_name`, so it matches with BLE name you want to update.
+3. Copy a `CONFIG.TXT` from the repo and change `ble_name`, so it matches with BLE name you want to update. example: `RAK4631_OTA`
 4. **Eject the drive** (or unplug if the XIAO is battery-powered).
 5. The XIAO scans for a target advertising the Legacy DFU service, optionally sends the buttonless trigger to kick it from app mode into bootloader, then runs the full DFU sequence.
 6. On success the `.zip` is deleted from the drive; the `LOG.TXT` keeps the history.
