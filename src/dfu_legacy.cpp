@@ -117,10 +117,16 @@ static void put_u32le(uint8_t* p, uint32_t v) {
   p[3] = (uint8_t)(v >> 24);
 }
 
-// Send RESET (0x06) and disconnect. This is the safe exit on any error: it
-// tells the bootloader to throw away whatever DFU state it accumulated so
-// the *next* attempt starts clean instead of getting INVALID_STATE back on
-// its very first START_DFU.
+// Send RESET (0x06) and let the bootloader tear down the link itself. This
+// is the safe exit on any error: it tells the bootloader to throw away
+// whatever DFU state it accumulated so the *next* attempt starts clean
+// instead of getting INVALID_STATE back on its very first START_DFU.
+//
+// We do NOT initiate the disconnect ourselves — RESET is processed
+// asynchronously and the bootloader needs time to act on it before it
+// reboots. If we disconnect first the bootloader may just terminate the
+// link without ever running its RESET handler, leaving the half-finished
+// DFU state in place and the next attempt will hit the same wall.
 static Result fail(Result r) {
   if (s_connected) {
     uint8_t reset_cmd[1] = { OP_RESET };
@@ -128,11 +134,21 @@ static Result fail(Result r) {
     // Nordic Legacy DFU bootloaders only advertises Write (no WriteWithout-
     // Response), and the SoftDevice silently drops WRITE_CMDs to chars that
     // don't list that property. write_resp blocks until either the peer ACKs
-    // or it times out — either way, we then disconnect.
+    // or it times out.
+    //
+    // The return value is intentionally ignored: even if our local write
+    // queue refuses (because the link is already half-dead), the disconnect
+    // path below still cleans up.
     s_ctrl.write_resp(reset_cmd, sizeof(reset_cmd));
-    Bluefruit.disconnect(s_conn_handle);
+    // Wait for the bootloader to drop the link as a side-effect of RESET.
+    // 3 s covers the typical "process command + reboot" round trip. If it
+    // doesn't happen we force a local disconnect so we don't stall here.
+    if (!wait_disconnected(3000)) {
+      logger::log("dfu: peer did not drop link after RESET, forcing");
+      Bluefruit.disconnect(s_conn_handle);
+      wait_disconnected(2000);
+    }
   }
-  wait_disconnected(3000);
   return r;
 }
 
@@ -162,6 +178,19 @@ Result run(const ble_scanner::Target& target,
   if (!Bluefruit.Central.connect(&addr)) return Result::kConnectFailed;
   if (!wait_connected(10000))            return Result::kConnectFailed;
 
+  // Connection-stability gate. At low RSSI the LL handshake can complete just
+  // long enough to fire on_connect, then immediately fail with reason 0x3E
+  // (CONN_FAILED_TO_BE_ESTABLISHED). Without this short settle window we
+  // march on through MTU exchange and service discovery on a dead link, and
+  // misreport the failure as "DFU service not present" instead of "couldn't
+  // hold a connection". 300 ms is well past the timing window in which the
+  // LL aborts its own setup.
+  delay(300);
+  if (!s_connected) {
+    logger::log("dfu: link dropped immediately after connect (weak signal?)");
+    return Result::kConnectFailed;
+  }
+
   // Optional MTU negotiation. nRF52840 SoftDevice supports up to 247.
   // Many Nordic Legacy DFU bootloaders honour the exchange and let us write
   // (mtu-3)-byte payloads to the Packet characteristic — typically 5–10x
@@ -172,6 +201,10 @@ Result run(const ble_scanner::Target& target,
     if (conn) {
       conn->requestMtuExchange(247);
       delay(200);  // let the exchange complete
+      if (!s_connected) {
+        logger::log("dfu: link dropped during MTU exchange");
+        return Result::kConnectFailed;
+      }
       uint16_t mtu = conn->getMtu();
       payload = mtu > 3 ? mtu - 3 : 20;
       logger::log("dfu: MTU negotiated = %u (payload=%u)", mtu, payload);

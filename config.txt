@@ -1,5 +1,8 @@
-# Substring filter for advertised BLE name. Empty = any peer with DFU service.
-ble_name=XIAO
+# Substring filter for target advertised BLE name. use pipe as OR operator
+# Examples:
+# RAK4631_OTA | 4631_DFU
+# SENSECAP_SOLAR_OTA
+ble_name=
 
 # Packet Receipt Notification cadence (writes per ACK from the peer).
 # 10 is the safe Nordic default. Higher = faster but risk overflowing the
@@ -11,7 +14,7 @@ prn=10
 high_mtu=1
 
 # Number of DFU attempts before giving up.
-retries=3
+retries=10
 
 # Seconds to wait between failed attempts. The bootloader needs time to
 # settle after a reset before it'll accept another START_DFU.
@@ -20,7 +23,7 @@ retry_cooldown=5
 # Minimum RSSI (dBm, negative). Ads weaker than this are rejected during
 # scan. -127 = no minimum. Useful on a drone to refuse flashing when
 # the signal isn't strong enough to reliably stream.
-min_rssi=-80
+min_rssi=-75
 
 # BLE TX power in dBm. nRF52840 allowed values:
 #   -40, -20, -16, -12, -8, -4, 0, 2, 3, 4, 5, 6, 7, 8
