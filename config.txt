@@ -1,5 +1,5 @@
 # Substring filter for advertised BLE name. Empty = any peer with DFU service.
-ble_name=
+ble_name=XIAO
 
 # Packet Receipt Notification cadence (writes per ACK from the peer).
 # 10 is the safe Nordic default. Higher = faster but risk overflowing the

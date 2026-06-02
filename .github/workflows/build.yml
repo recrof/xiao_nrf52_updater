@@ -12,6 +12,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [xiao_nrf52840, rak4631]
     steps:
       - uses: actions/checkout@v4
 
@@ -30,8 +34,8 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
-      - name: Build firmware
-        run: pio run
+      - name: Build firmware (${{ matrix.env }})
+        run: pio run -e ${{ matrix.env }}
 
       # Produce a drag-and-drop UF2 alongside the .hex and the nrfutil .zip.
       # uf2conv lives in microsoft/uf2; fetched at build time so we don't
@@ -42,8 +46,8 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2families.json -o /tmp/uf2families.json
           python3 /tmp/uf2conv.py \
             -f 0xADA52840 \
-            -c .pio/build/xiao_nrf52840/firmware.hex \
-            -o .pio/build/xiao_nrf52840/firmware.uf2
+            -c .pio/build/${{ matrix.env }}/firmware.hex \
+            -o .pio/build/${{ matrix.env }}/firmware.uf2
 
       - name: Stage release artifacts
         run: |
@@ -51,15 +55,16 @@ jobs:
           # Tag pushes get versioned names; manual runs just use the build name.
           VER="${GITHUB_REF_NAME}"
           [[ "$GITHUB_REF" == refs/tags/* ]] || VER="dev-${GITHUB_SHA::7}"
-          cp .pio/build/xiao_nrf52840/firmware.hex out/xiao_nrf52_updater-${VER}.hex
-          cp .pio/build/xiao_nrf52840/firmware.zip out/xiao_nrf52_updater-${VER}.zip
-          cp .pio/build/xiao_nrf52840/firmware.uf2 out/xiao_nrf52_updater-${VER}.uf2
+          BASE="xiao_nrf52_updater-${{ matrix.env }}-${VER}"
+          cp .pio/build/${{ matrix.env }}/firmware.hex out/${BASE}.hex
+          cp .pio/build/${{ matrix.env }}/firmware.zip out/${BASE}.zip
+          cp .pio/build/${{ matrix.env }}/firmware.uf2 out/${BASE}.uf2
           ls -la out/
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: firmware
+          name: firmware-${{ matrix.env }}
           path: out/*
 
       - name: Create draft release

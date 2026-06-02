@@ -1,7 +1,7 @@
 # xiao_nrf52_updater
 
 
-A standalone BLE DFU client that runs on a Seeed XIAO nRF52840 and flashes Nordic-format firmware bundles to *other* nRF52 devices over Bluetooth. Drag a `.zip` onto the XIAO's USB drive, eject it (or unplug if the XIAO is battery-powered), and the XIAO connects to a nearby DFU target and flashes it.
+A standalone BLE DFU client that runs on a **Seeed XIAO nRF52840**, **RAK4631** (with RAK15001 QSPI flash) and flashes Nordic-format firmware bundles to *other* nRF52 devices over Bluetooth. Drag a `.zip` onto the board's USB drive, eject it (or unplug if running on battery), and the board connects to a nearby DFU target and flashes it.
 
 <p align="center">
   <img src="img/drone.jpg" width="400"><br>
@@ -14,7 +14,7 @@ Intended use: a drone-mounted programmer that updates a remote nRF52 payload in 
 
 | Component | Role |
 |---|---|
-| **USB MSC** | Exposes the XIAO's 2 MB QSPI flash as a FAT12 USB drive (label `XIAO DFU`). The host drops the `.zip` and the optional `CONFIG.TXT` here. |
+| **USB MSC** | Exposes a 2 MB QSPI flash as a FAT12 USB drive (label `XIAO DFU` on XIAO, `RAK DFU` on RAK4631). The host drops the `.zip` and the optional `CONFIG.TXT` here. |
 | **`CONFIG.TXT`** | `key=value` config (BLE name filter, PRN, MTU, retries, min RSSI, retry cooldown). |
 | **`LOG.TXT`** | Append-only log written by the firmware between sessions. |
 | **BLE central** | Bluefruit central; scans for the Nordic Legacy DFU service UUID. |
@@ -98,15 +98,15 @@ Notes:
 
 ## LED indicators
 
-LEDs are active-low on the XIAO.
+XIAO has 3 LEDs (R/G/B, active-low). RAK4631 has 2 (green + blue, active-high) and uses an alternating pattern to signal failure instead of a red LED.
 
-| State | Color | Pattern |
+| State | XIAO | RAK4631 |
 |---|---|---|
-| Idle, no host | BLUE | slow blink (~1 Hz) |
-| Host has the drive mounted | BLUE | solid |
-| DFU running, streaming | GREEN | blink accelerates from ~1 Hz at 0% to near-solid at ~95% |
-| DFU succeeded | GREEN | solid |
-| DFU failed (after retries) | RED | solid |
+| Idle, no host | BLUE slow blink (~1 Hz) | BLUE slow blink (~1 Hz) |
+| Host has the drive mounted | BLUE solid | BLUE solid |
+| DFU running, streaming | GREEN blink, period shrinks 0%→95% | same |
+| DFU succeeded | GREEN solid | GREEN solid |
+| DFU failed (after retries) | RED solid | GREEN+BLUE alternating ~4 Hz |
 
 The progress LED is driven from inside the DFU stream loop (the main loop is blocked during DFU), so it animates in real time.
 
@@ -138,15 +138,28 @@ The `.zip` is validated by parsing `manifest.json` and locating the `.bin` + `.d
 
 ## Build & flash
 
+Two build environments are available:
+
+| `pio` env | Board | QSPI flash | Drive label |
+|---|---|---|---|
+| `xiao_nrf52840` | Seeed XIAO nRF52840 | on-board Puya P25Q16H (2 MB) | `XIAO DFU` |
+| `rak4631` | RAKwireless RAK4631 | external RAK15001 module - GigaDevice GD25Q16 (2 MB) | `RAK DFU` |
+
 ```bash
-pio run                # build
-pio run -t upload      # flash via the XIAO's factory bootloader (nrfutil)
-pio device monitor     # 115200 baud, watches serial
+pio run -e xiao_nrf52840                  # build XIAO target
+pio run -e xiao_nrf52840 -t upload        # flash XIAO via factory bootloader (nrfutil)
+
+# or
+pio run -e rak4631                        # build RAK target
+pio run -e rak4631 -t upload              # flash via factory bootloader (nrfutil)
+
+# optional debug
+pio device monitor                        # 115200 baud, watches serial
 ```
 
-Requirements: PlatformIO with the upstream `nordicnrf52` platform. The project's `platformio.ini` pins the BSP to a meshcore-dev fork of `framework-arduinoadafruitnrf52` (BLE stack patches). Board JSON and linker script are vendored under `boards/`. Variant under `variants/xiao_nrf52/`.
+Requirements: PlatformIO with the upstream `nordicnrf52` platform. The project's `platformio.ini` pins the BSP to a meshcore-dev fork of `framework-arduinoadafruitnrf52` (BLE stack patches). Board JSONs and linker script are vendored under `boards/`. Variants under `variants/xiao_nrf52/` and `variants/rak4631/`.
 
-No bootloader replacement on the XIAO is required - the factory Seeed UF2 bootloader works.
+No bootloader replacement is required on either board — the factory UF2 bootloader works.
 
 ## Project layout
 
@@ -161,8 +174,9 @@ src/
   firmware_zip.{h,cpp} - manifest.json parsing, locates .bin + .dat
   ble_scanner.{h,cpp}  - Bluefruit central scan, UUID + pipe-delimited name + RSSI + MAC/MAC+1 filtering
   dfu_legacy.{h,cpp}   - Legacy DFU client state machine (mirrors LegacyDfuImpl.java)
-boards/              - board JSON + s140 linker script
-variants/xiao_nrf52/ - pin map + variant.cpp (BSP doesn't ship one for XIAO)
+boards/              - board JSONs (xiao, rak4631) + s140 linker script
+variants/xiao_nrf52/ - XIAO pin map + variant.cpp (BSP doesn't ship one)
+variants/rak4631/    - RAK4631 (WisBlock) pin map + variant.cpp
 ```
 
 ## Known limitations

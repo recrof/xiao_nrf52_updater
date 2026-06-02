@@ -12,6 +12,27 @@ static FatVolume                    s_fatfs;
 Adafruit_SPIFlash& flash() { return s_flash; }
 FatVolume&         fs()    { return s_fatfs; }
 
+// Board-specific QSPI pinout + drive label. XIAO routes its on-board Puya
+// P25Q16H to a fixed P0 set; RAK4631 brings the SoC QSPI out to WisBlock
+// Slot A where the user wires their own GD25Q16.
+#if defined(BOARD_RAK4631)
+  static constexpr uint8_t kQspiSck = 3;   // P0.03
+  static constexpr uint8_t kQspiCsn = 26;  // P0.26
+  static constexpr uint8_t kQspiIo0 = 30;  // P0.30
+  static constexpr uint8_t kQspiIo1 = 29;  // P0.29
+  static constexpr uint8_t kQspiIo2 = 28;  // P0.28
+  static constexpr uint8_t kQspiIo3 = 2;   // P0.02
+  static constexpr const char kVolLabel[12] = "RAK DFU    ";
+#else  // BOARD_XIAO_NRF52840
+  static constexpr uint8_t kQspiSck = 21;
+  static constexpr uint8_t kQspiCsn = 25;
+  static constexpr uint8_t kQspiIo0 = 20;
+  static constexpr uint8_t kQspiIo1 = 24;
+  static constexpr uint8_t kQspiIo2 = 22;
+  static constexpr uint8_t kQspiIo3 = 23;
+  static constexpr const char kVolLabel[12] = "XIAO DFU   ";
+#endif
+
 // SdFat's FatFormatter rejects volumes <= 6 MB because it's built for SD cards.
 // We need to format a 2 MB QSPI flash, so we write a minimal FAT12 image
 // directly. Layout (all values are 512 B sectors):
@@ -61,7 +82,7 @@ static bool format_flash() {
   sec[36] = 0x80;                                        // physical drive
   sec[38] = 0x29;                                        // extended boot sig
   sec[39] = 0x42; sec[40] = 0x42; sec[41] = 0x42; sec[42] = 0x42;
-  memcpy(sec + 43, "XIAO DFU   ", 11);                   // volume label
+  memcpy(sec + 43, kVolLabel, 11);                       // volume label
   memcpy(sec + 54, "FAT12   ", 8);                       // FS type
   sec[510] = 0x55; sec[511] = 0xAA;                      // boot signature
   if (!s_flash.writeBlocks(0, sec, 1)) return false;
@@ -106,12 +127,12 @@ bool begin() {
   // transport ignores all return codes.
   nrfx_qspi_config_t cfg = {};
   cfg.xip_offset           = 0;
-  cfg.pins.sck_pin         = 21; // P0.21
-  cfg.pins.csn_pin         = 25; // P0.25
-  cfg.pins.io0_pin         = 20; // P0.20
-  cfg.pins.io1_pin         = 24; // P0.24
-  cfg.pins.io2_pin         = 22; // P0.22
-  cfg.pins.io3_pin         = 23; // P0.23
+  cfg.pins.sck_pin         = kQspiSck;
+  cfg.pins.csn_pin         = kQspiCsn;
+  cfg.pins.io0_pin         = kQspiIo0;
+  cfg.pins.io1_pin         = kQspiIo1;
+  cfg.pins.io2_pin         = kQspiIo2;
+  cfg.pins.io3_pin         = kQspiIo3;
   cfg.prot_if.readoc       = NRF_QSPI_READOC_FASTREAD; // 1-bit, no QE bit needed
   cfg.prot_if.writeoc      = NRF_QSPI_WRITEOC_PP;
   cfg.prot_if.addrmode     = NRF_QSPI_ADDRMODE_24BIT;
@@ -154,11 +175,15 @@ bool begin() {
   }
 
   // Hand off to Adafruit_SPIFlash for filesystem-level access. The library's
-  // default device table doesn't include the Puya P25Q16H on the XIAO, so we
-  // pass it explicitly — otherwise begin() returns false even when the JEDEC
-  // probe succeeds.
-  static const SPIFlash_Device_t s_xiao_flash_dev = P25Q16H;
-  if (!s_flash.begin(&s_xiao_flash_dev, 1)) {
+  // default device table is too narrow and rejects valid JEDEC IDs we care
+  // about (Puya P25Q16H on the XIAO; GigaDevice GD25Q16 wired into RAK
+  // Slot A), so we pass the device descriptor explicitly per board.
+#if defined(BOARD_RAK4631)
+  static const SPIFlash_Device_t s_flash_dev = GD25Q16C;
+#else
+  static const SPIFlash_Device_t s_flash_dev = P25Q16H;
+#endif
+  if (!s_flash.begin(&s_flash_dev, 1)) {
     Serial.println("storage: flash.begin() failed (no JEDEC match?)");
     return false;
   }

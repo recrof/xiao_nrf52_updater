@@ -21,12 +21,15 @@
 //   BLUE  solid          = host has the drive mounted
 //   GREEN fast blink     = DFU running
 //   GREEN solid          = DFU succeeded
-//   RED   solid          = DFU failed (after 3 retries) / boot error
+//   RED   solid          = DFU failed (XIAO; has 3 LEDs)
+//   GREEN+BLUE alternate = DFU failed (RAK4631; no red LED)
 
 static void led_set(uint8_t pin, bool on) { digitalWrite(pin, on ? LED_STATE_ON : !LED_STATE_ON); }
 
 static void leds_off() {
+#if !defined(BOARD_RAK4631)
   pinMode(LED_RED,   OUTPUT); led_set(LED_RED,   false);
+#endif
   pinMode(LED_GREEN, OUTPUT); led_set(LED_GREEN, false);
   pinMode(LED_BLUE,  OUTPUT); led_set(LED_BLUE,  false);
 }
@@ -191,15 +194,24 @@ static void leds_tick(uint32_t now) {
   static uint32_t last  = 0;
   static bool     phase = false;
 
+  // Helper to clear the red LED on boards that have one. On RAK4631 LED_RED
+  // is aliased to LED_GREEN, so calling led_set(LED_RED, ...) would clobber
+  // the green channel — guard it instead.
+#if defined(BOARD_RAK4631)
+  #define LED_RED_SET(on) ((void)0)
+#else
+  #define LED_RED_SET(on) led_set(LED_RED, (on))
+#endif
+
   switch (s_state) {
     case State::kIdle:
       if (usb_msc::is_mounted()) {
-        led_set(LED_RED,   false);
+        LED_RED_SET(false);
         led_set(LED_GREEN, false);
         led_set(LED_BLUE,  true);
       } else {
         if (now - last >= 500) { last = now; phase = !phase; }
-        led_set(LED_RED,   false);
+        LED_RED_SET(false);
         led_set(LED_GREEN, false);
         led_set(LED_BLUE,  phase);
       }
@@ -211,29 +223,38 @@ static void leds_tick(uint32_t now) {
       uint8_t  pct       = s_progress_pct;
       uint32_t half_ms;
       if (pct >= 100) {
-        led_set(LED_RED, false);
+        LED_RED_SET(false);
         led_set(LED_GREEN, true);
         led_set(LED_BLUE, false);
         break;
       }
       half_ms = 600 - ((uint32_t)pct * (600 - 30)) / 100;  // 600..30 ms
       if (now - last >= half_ms) { last = now; phase = !phase; }
-      led_set(LED_RED,   false);
+      LED_RED_SET(false);
       led_set(LED_GREEN, phase);
       led_set(LED_BLUE,  false);
       break;
     }
     case State::kDoneOk:
-      led_set(LED_RED,   false);
+      LED_RED_SET(false);
       led_set(LED_GREEN, true);
       led_set(LED_BLUE,  false);
       break;
     case State::kDoneFail:
+#if defined(BOARD_RAK4631)
+      // No red LED — alternate green/blue at ~4 Hz so the failure state is
+      // unmistakable.
+      if (now - last >= 125) { last = now; phase = !phase; }
+      led_set(LED_GREEN, phase);
+      led_set(LED_BLUE,  !phase);
+#else
       led_set(LED_RED,   true);
       led_set(LED_GREEN, false);
       led_set(LED_BLUE,  false);
+#endif
       break;
   }
+#undef LED_RED_SET
 }
 
 // ---------------------------------------------------------------------------
