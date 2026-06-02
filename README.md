@@ -3,11 +3,9 @@
 
 A standalone BLE DFU client that runs on a Seeed XIAO nRF52840 and flashes Nordic-format firmware bundles to *other* nRF52 devices over Bluetooth. Drag a `.zip` onto the XIAO's USB drive, eject it (or unplug if the XIAO is battery-powered), and the XIAO connects to a nearby DFU target and flashes it.
 
-<p style="align: center">
-  <figure>
-    <img src="img/drone.jpg" alt="" width="400">
-    <figcaption>DJI Neo 2 with Seeed Xiao nRF52 and 600mA battery: 10g payload</figcaption>
-  </figure>
+<p style="margin: 0 auto; width: 400px">
+  <img src="img/drone.jpg" alt="" width="400"><br>
+  <small>DJI Neo 2 with Seeed Xiao nRF52 and 600mA battery: 10g payload</small>
 </p>
 
 Intended use: a drone-mounted programmer that updates a remote nRF52 payload in the field, without a phone or laptop in the loop.
