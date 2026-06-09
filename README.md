@@ -8,13 +8,13 @@ A standalone BLE DFU client that runs on a **Seeed XIAO nRF52840**, **RAK4631** 
   <sup>DJI Neo 2 with Seeed Xiao nRF52 and 600mA battery: 10g payload</sup>
 </p>
 
-Intended use: a drone-mounted programmer that updates a remote nRF52 payload in the field, without a phone or laptop in the loop.
+Intended use: a drone-mounted OTA flasher that updates a hard to reach nRF52 repeater in the field.
 
 ## What's in the box
 
 | Component | Role |
 |---|---|
-| **USB MSC** | Exposes a 2 MB QSPI flash as a FAT12 USB drive (label `XIAO DFU` on XIAO, `RAK DFU` on RAK4631). The host drops the `.zip` and the optional `CONFIG.TXT` here. |
+| **USB MSC** | Exposes a 2 MB QSPI flash as a FAT12 USB drive (label `XIAO DFU` on XIAO, `RAK DFU` on RAK4631). The host drops the host firmware `.zip` and the `CONFIG.TXT` here. |
 | **`CONFIG.TXT`** | `key=value` config (BLE name filter, PRN, MTU, retries, min RSSI, retry cooldown). |
 | **`LOG.TXT`** | Append-only log written by the firmware between sessions. |
 | **BLE central** | Bluefruit central; scans for the Nordic Legacy DFU service UUID. |
