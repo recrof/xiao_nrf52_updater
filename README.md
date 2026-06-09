@@ -1,6 +1,5 @@
 # xiao_nrf52_updater
 
-
 A standalone BLE DFU client that runs on a **Seeed XIAO nRF52840**, **RAK4631** (with RAK15001 QSPI flash) and flashes Nordic-format firmware bundles to *other* nRF52 devices over Bluetooth. Drag a `.zip` onto the board's USB drive, eject it (or unplug if running on battery), and the board connects to a nearby DFU target and flashes it.
 
 <p align="center">
@@ -42,7 +41,7 @@ Only one runs per boot; after success or final failure the firmware sits idle un
 
 ## CONFIG.TXT
 
-Optional. `key=value` per line, `#` or `;` start a comment, whitespace trimmed. Missing keys use defaults.
+`key=value` per line, `#` or `;` start a comment, Missing keys use defaults.
 
 ```
 # Substring filter for advertised BLE name. Empty = any peer with DFU service.
