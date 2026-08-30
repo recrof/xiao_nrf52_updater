@@ -118,7 +118,7 @@ static bool scan_for_target(ble_scanner::Target* out,
 // a retry — only post-scan DFU failures do. Buttonless triggers also don't
 // consume retries: we just rescan after the peer reboots.
 static void run_dfu_sequence() {
-  char zip_name[64];
+  char zip_name[128];
   int n = storage::find_single_zip(zip_name, sizeof(zip_name));
   if (n <= 0) {
     logger::log("dfu: trigger but no zip on drive (count=%d)", n);
@@ -321,7 +321,7 @@ void setup() {
   // requirements' "physical unplug → board flashes target" workflow when
   // the XIAO has a battery wired to BAT+/BAT-.
   if (!vbus && s_storage_ok) {
-    char zip_name[64];
+    char zip_name[128];
     if (storage::find_single_zip(zip_name, sizeof(zip_name)) == 1) {
       logger::log("boot: no VBUS + zip present, arming DFU");
       s_armed_boot = true;
