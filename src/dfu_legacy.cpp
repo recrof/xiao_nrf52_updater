@@ -46,6 +46,9 @@ static volatile uint16_t s_conn_handle = BLE_CONN_HANDLE_INVALID;
 static volatile bool     s_notif_ready = false;
 static uint8_t           s_notif_buf[20];
 static uint8_t           s_notif_len   = 0;
+static volatile bool     s_response_ready = false;
+static uint8_t           s_response_buf[20];
+static uint8_t           s_response_len   = 0;
 
 static ProgressCb        s_progress_cb = nullptr;
 void set_progress_callback(ProgressCb cb) { s_progress_cb = cb; }
@@ -66,7 +69,16 @@ static void on_disconnect(uint16_t conn_handle, uint8_t reason) {
 
 static void on_ctrl_notify(BLEClientCharacteristic* chr, uint8_t* data, uint16_t len) {
   (void)chr;
+
   if (len > sizeof(s_notif_buf)) len = sizeof(s_notif_buf);
+
+  if (len > 0 && data[0] == OP_RESPONSE_CODE) {
+    memcpy((uint8_t*)s_response_buf, data, len);
+    s_response_len   = (uint8_t)len;
+    s_response_ready = true;
+    return;
+  }
+
   memcpy((uint8_t*)s_notif_buf, data, len);
   s_notif_len   = (uint8_t)len;
   s_notif_ready = true;
@@ -96,18 +108,37 @@ static bool wait_notification(uint32_t timeout_ms) {
 // Validate a control-point response notification. Expected layout: [0x10, <op>, <status>].
 // Returns the status byte, or 0xFF on protocol error.
 static uint8_t consume_response(uint8_t expected_op) {
-  if (!wait_notification(15000)) {
-    logger::log("dfu: response timeout (expected op=0x%02x)", expected_op);
-    return 0xFF;
-  }
-  s_notif_ready = false;
+  uint32_t deadline = millis() + 15000;
 
-  if (s_notif_len < 3 || s_notif_buf[0] != OP_RESPONSE_CODE || s_notif_buf[1] != expected_op) {
-    logger::log("dfu: unexpected response  op_class=0x%02x op=0x%02x len=%u",
-                s_notif_buf[0], s_notif_buf[1], s_notif_len);
+  while (!s_response_ready &&
+         s_connected &&
+         (int32_t)(deadline - millis()) > 0) {
+    delay(20);
+  }
+
+  if (!s_response_ready) {
+    logger::log(
+        "dfu: response timeout (expected op=0x%02x)",
+        expected_op);
     return 0xFF;
   }
-  return s_notif_buf[2];
+
+  s_response_ready = false;
+
+  if (s_response_len < 3 ||
+      s_response_buf[0] != OP_RESPONSE_CODE ||
+      s_response_buf[1] != expected_op) {
+
+    logger::log(
+        "dfu: unexpected response  op_class=0x%02x op=0x%02x len=%u",
+        s_response_buf[0],
+        s_response_len >= 2 ? s_response_buf[1] : 0,
+        s_response_len);
+
+    return 0xFF;
+  }
+
+  return s_response_buf[2];
 }
 
 static void put_u32le(uint8_t* p, uint32_t v) {
@@ -169,6 +200,8 @@ Result run(const ble_scanner::Target& target,
   s_conn_handle = BLE_CONN_HANDLE_INVALID;
   s_notif_ready = false;
   s_notif_len   = 0;
+  s_response_ready = false;
+  s_response_len   = 0;
 
   ble_gap_addr_t addr = target.addr;
   logger::log("dfu: connecting to %02X:%02X:%02X:%02X:%02X:%02X",
@@ -401,28 +434,33 @@ Result run(const ble_scanner::Target& target,
     // are disabled so we never hit this branch.
     if (prn > 0 && packets_in_burst >= prn) {
       packets_in_burst = 0;
-      if (!wait_notification(5000)) {
-        logger::log("dfu: PRN timeout at sent=%lu", (unsigned long)sent);
-        return fail(Result::kTimeout);
-      }
-      s_notif_ready = false;
-      if (s_notif_len >= 5 && s_notif_buf[0] == OP_PKT_RECEIPT_NOTIF) {
-        uint32_t peer_recv = (uint32_t)s_notif_buf[1] |
-                             ((uint32_t)s_notif_buf[2] << 8) |
-                             ((uint32_t)s_notif_buf[3] << 16) |
-                             ((uint32_t)s_notif_buf[4] << 24);
-        // The peer's count must agree with ours. If it doesn't, the link or
-        // bootloader is desynced and continuing is pointless.
-        if (peer_recv != sent) {
-          logger::log("dfu: PRN mismatch  sent=%lu peer=%lu",
-                      (unsigned long)sent, (unsigned long)peer_recv);
-          return fail(Result::kRemoteError);
+
+      // Don't wait for a PRN after the final firmware packet.
+      // The final RECEIVE_FW response is handled below.
+      if (sent < bundle.bin.size) {
+        if (!wait_notification(5000)) {
+          logger::log("dfu: PRN timeout at sent=%lu", (unsigned long)sent);
+          return fail(Result::kTimeout);
         }
-      } else {
-        // Could be the final 0x10/0x03 already — we'll handle that after the
-        // stream loop. For now log unexpected and continue.
-        logger::log("dfu: unexpected notif during stream  op=0x%02x len=%u",
-                    s_notif_buf[0], s_notif_len);
+        s_notif_ready = false;
+        if (s_notif_len >= 5 && s_notif_buf[0] == OP_PKT_RECEIPT_NOTIF) {
+          uint32_t peer_recv = (uint32_t)s_notif_buf[1] |
+                              ((uint32_t)s_notif_buf[2] << 8) |
+                              ((uint32_t)s_notif_buf[3] << 16) |
+                              ((uint32_t)s_notif_buf[4] << 24);
+          // The peer's count must agree with ours. If it doesn't, the link or
+          // bootloader is desynced and continuing is pointless.
+          if (peer_recv != sent) {
+            logger::log("dfu: PRN mismatch  sent=%lu peer=%lu",
+                        (unsigned long)sent, (unsigned long)peer_recv);
+            return fail(Result::kRemoteError);
+          }
+        } else {
+          // Could be the final 0x10/0x03 already — we'll handle that after the
+          // stream loop. For now log unexpected and continue.
+          logger::log("dfu: unexpected notif during stream  op=0x%02x len=%u",
+                      s_notif_buf[0], s_notif_len);
+        }
       }
     }
 
