@@ -1,5 +1,9 @@
 # xiao_nrf52_updater
 
+> [!IMPORTANT]  
+> This repository is no longer mainained in favour of more advanced https://github.com/recrof/drone_meshcore_updater written in Zephyr.
+> Please migrate your updaters to the new version.
+
 A standalone BLE DFU client that runs on a **Seeed XIAO nRF52840**, **RAK4631** (with RAK15001 QSPI flash) and flashes Nordic-format firmware bundles to *other* nRF52 devices over Bluetooth. Drag a `.zip` onto the board's USB drive, eject it (or unplug if running on battery), and the board connects to a nearby DFU target and flashes it.
 
 <p align="center">
